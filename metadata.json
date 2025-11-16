@@ -1,0 +1,7 @@
+{
+  "name": "Local Business Finder with Maps",
+  "description": "An application that uses Gemini with Google Maps Grounding to find and list local businesses based on user queries, providing results in a clean, table format with source links.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
