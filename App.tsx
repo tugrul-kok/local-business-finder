@@ -24,6 +24,7 @@ const App: React.FC = () => {
     const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
     const [locationStatus, setLocationStatus] = useState<'idle' | 'fetching' | 'success' | 'error'>('idle');
     const [modelOption, setModelOption] = useState<ModelOption>('fast');
+    const [loadingMessage, setLoadingMessage] = useState<string>('');
 
     const handleGetLocation = useCallback(() => {
         if (!navigator.geolocation) {
@@ -166,14 +167,40 @@ const App: React.FC = () => {
         setBusinesses([]);
         setSources([]);
 
+        const primaryModel = modelMapping[modelOption];
+        const fallbackModelOption = modelOption === 'fast' ? 'deep' : 'fast';
+        const fallbackModel = modelMapping[fallbackModelOption];
+        
+        setLoadingMessage(`Searching with ${modelOption === 'fast' ? 'Fast' : 'Deep'} Search...`);
+
         try {
-            const result = await findBusinesses(query, userLocation, modelMapping[modelOption]);
+            let result;
+            try {
+                result = await findBusinesses(query, userLocation, primaryModel);
+            } catch (e) {
+                if (e instanceof Error && e.message.includes("overloaded and could not respond")) {
+                    console.warn(`Primary model (${primaryModel}) failed due to overload. Attempting fallback with ${fallbackModel}.`);
+                    setLoadingMessage(`Primary model is busy. Trying ${fallbackModelOption} search...`);
+                    result = await findBusinesses(query, userLocation, fallbackModel);
+                } else {
+                    // Re-throw non-overload errors to be caught by the outer catch block
+                    throw e;
+                }
+            }
+
+            // If we get here, one of the calls succeeded
             const parsedBusinesses = parseCsv(result.csvData);
             setBusinesses(parsedBusinesses);
             setSources(result.sources);
+
         } catch (e) {
+            // This catches the re-thrown error from the primary call, or any error from the fallback call
             if (e instanceof Error) {
-                setError(e.message);
+                if (e.message.includes("overloaded and could not respond")) {
+                    setError("Both Fast and Deep search models are currently overloaded. Please try again in a few moments.");
+                } else {
+                    setError(e.message);
+                }
             } else {
                 setError("An unexpected error occurred.");
             }
@@ -222,7 +249,7 @@ const App: React.FC = () => {
                         setModelOption={setModelOption}
                     />
                     <div className="mt-8 p-6 bg-gray-800/50 rounded-lg shadow-xl min-h-[400px] flex flex-col justify-center">
-                        {isLoading && <LoadingSpinner />}
+                        {isLoading && <LoadingSpinner message={loadingMessage} />}
                         {error && !isLoading && <ErrorMessage message={error} />}
                         {!isLoading && !error && businesses.length > 0 && (
                             <>
