@@ -13,7 +13,8 @@ interface UserLocation {
 
 export const findBusinesses = async (
     query: string,
-    location: UserLocation | null
+    location: UserLocation | null,
+    model: string
 ): Promise<FindBusinessesResult> => {
     if (!process.env.API_KEY) {
         throw new Error("API_KEY environment variable not set");
@@ -61,7 +62,7 @@ Your task is to take a user's query, use the provided Google Maps and Google Sea
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-pro",
+            model: model,
             // The combined prompt is sent as the main content.
             contents: prompt,
             config: {

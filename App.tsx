@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { findBusinesses } from './services/geminiService';
-import type { Business, GroundingChunk, SortConfig } from './types';
+import type { Business, GroundingChunk, SortConfig, ModelOption } from './types';
 import Header from './components/Header';
 import SearchInput from './components/SearchInput';
 import ResultsTable from './components/ResultsTable';
@@ -8,6 +8,11 @@ import SourceLinks from './components/SourceLinks';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
 import WelcomeMessage from './components/WelcomeMessage';
+
+const modelMapping: Record<ModelOption, string> = {
+    fast: 'gemini-2.5-flash',
+    deep: 'gemini-2.5-pro',
+};
 
 const App: React.FC = () => {
     const [query, setQuery] = useState<string>('');
@@ -18,6 +23,7 @@ const App: React.FC = () => {
     const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
     const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
     const [locationStatus, setLocationStatus] = useState<'idle' | 'fetching' | 'success' | 'error'>('idle');
+    const [modelOption, setModelOption] = useState<ModelOption>('fast');
 
     const handleGetLocation = useCallback(() => {
         if (!navigator.geolocation) {
@@ -161,7 +167,7 @@ const App: React.FC = () => {
         setSources([]);
 
         try {
-            const result = await findBusinesses(query, userLocation);
+            const result = await findBusinesses(query, userLocation, modelMapping[modelOption]);
             const parsedBusinesses = parseCsv(result.csvData);
             setBusinesses(parsedBusinesses);
             setSources(result.sources);
@@ -174,7 +180,7 @@ const App: React.FC = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [query, userLocation]);
+    }, [query, userLocation, modelOption]);
 
     const sortedBusinesses = useMemo(() => {
         const sortableItems = [...businesses];
@@ -212,6 +218,8 @@ const App: React.FC = () => {
                         isLoading={isLoading}
                         onGetLocation={handleGetLocation}
                         locationStatus={locationStatus}
+                        modelOption={modelOption}
+                        setModelOption={setModelOption}
                     />
                     <div className="mt-8 p-6 bg-gray-800/50 rounded-lg shadow-xl min-h-[400px] flex flex-col justify-center">
                         {isLoading && <LoadingSpinner />}

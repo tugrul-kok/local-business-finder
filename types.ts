@@ -33,3 +33,5 @@ export interface GroundingChunk {
     title?: string;
   };
 }
+
+export type ModelOption = 'fast' | 'deep';
