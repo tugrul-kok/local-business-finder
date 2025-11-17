@@ -86,7 +86,7 @@ const App: React.FC = () => {
             };
 
             const headers = parseCsvLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, '')); // Clean headers
-            const requiredHeaders = ['İşletme Adı', 'Kategori', 'Adres', 'Telefon Numarası', 'Web Sitesi', 'E-posta', 'Google Maps Linki', 'Değerlendirme'];
+            const requiredHeaders = ['İşletme Adı', 'Kategori', 'Adres', 'Telefon Numarası', 'Web Sitesi', 'E-posta', 'Google Maps Linki', 'Değerlendirme Puanı', 'Değerlendirme Sayısı', 'Fiyat Aralığı', 'Çalışma Saatleri', 'Durum'];
             if (!requiredHeaders.every(h => headers.includes(h))) {
                  console.error("CSV headers do not match expected format.", {expected: requiredHeaders, received: headers});
                  throw new Error("The data received from the API was not in the expected format. Please try a different query.");
@@ -202,7 +202,7 @@ const App: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-gray-900 text-gray-100 font-sans">
-            <div className="container mx-auto p-4 md:p-8 max-w-5xl">
+            <div className="container mx-auto p-4 md:p-8 max-w-7xl">
                 <Header />
                 <main>
                     <SearchInput

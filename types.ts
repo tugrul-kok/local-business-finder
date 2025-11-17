@@ -6,7 +6,11 @@ export interface Business {
   'Web Sitesi': string;
   'E-posta': string;
   'Google Maps Linki': string;
-  'Değerlendirme': string; // Rating, e.g., "4.5/5"
+  'Değerlendirme Puanı': string; // Rating score, e.g., "4.5/5"
+  'Değerlendirme Sayısı': string; // Number of reviews, e.g., "1234"
+  'Fiyat Aralığı': string; // Price range, e.g., "$$"
+  'Çalışma Saatleri': string; // Opening hours
+  'Durum': string; // Status, e.g., "Open", "Closed"
 }
 
 export type SortDirection = 'ascending' | 'descending';
