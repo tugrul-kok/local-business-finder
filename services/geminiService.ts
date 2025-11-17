@@ -61,7 +61,7 @@ Your task is to take a user's query, use the provided Google Maps and Google Sea
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-2.5-pro",
             // The combined prompt is sent as the main content.
             contents: prompt,
             config: {
