@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { findBusinesses } from './services/geminiService';
-import type { Business, GroundingChunk } from './types';
+import type { Business, GroundingChunk, SortConfig } from './types';
 import Header from './components/Header';
 import SearchInput from './components/SearchInput';
 import ResultsTable from './components/ResultsTable';
@@ -16,6 +16,7 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
 
     useEffect(() => {
         if (navigator.geolocation) {
@@ -66,7 +67,7 @@ const App: React.FC = () => {
             };
 
             const headers = parseCsvLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, '')); // Clean headers
-            const requiredHeaders = ['İşletme Adı', 'Kategori', 'Adres', 'Telefon Numarası', 'Web Sitesi', 'E-posta'];
+            const requiredHeaders = ['İşletme Adı', 'Kategori', 'Adres', 'Telefon Numarası', 'Web Sitesi', 'E-posta', 'Google Maps Linki'];
             if (!requiredHeaders.every(h => headers.includes(h))) {
                  console.error("CSV headers do not match expected format.", {expected: requiredHeaders, received: headers});
                  throw new Error("The data received from the API was not in the expected format. Please try a different query.");
@@ -121,6 +122,30 @@ const App: React.FC = () => {
         }
     }, [query, userLocation]);
 
+    const sortedBusinesses = useMemo(() => {
+        const sortableItems = [...businesses];
+        if (sortConfig !== null) {
+            sortableItems.sort((a, b) => {
+                const aValue = a[sortConfig.key] || '';
+                const bValue = b[sortConfig.key] || '';
+                
+                // Using localeCompare for robust, case-insensitive string sorting
+                const comparison = aValue.localeCompare(bValue, undefined, { numeric: true, sensitivity: 'base' });
+
+                return sortConfig.direction === 'ascending' ? comparison : -comparison;
+            });
+        }
+        return sortableItems;
+    }, [businesses, sortConfig]);
+
+    const handleSort = (key: keyof Business) => {
+        let direction: 'ascending' | 'descending' = 'ascending';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
+            direction = 'descending';
+        }
+        setSortConfig({ key, direction });
+    };
+
     return (
         <div className="min-h-screen bg-gray-900 text-gray-100 font-sans">
             <div className="container mx-auto p-4 md:p-8 max-w-5xl">
@@ -137,7 +162,11 @@ const App: React.FC = () => {
                         {error && !isLoading && <ErrorMessage message={error} />}
                         {!isLoading && !error && businesses.length > 0 && (
                             <>
-                                <ResultsTable businesses={businesses} />
+                                <ResultsTable 
+                                    businesses={sortedBusinesses} 
+                                    onSort={handleSort}
+                                    sortConfig={sortConfig}
+                                />
                                 <SourceLinks sources={sources} />
                             </>
                         )}
