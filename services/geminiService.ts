@@ -31,7 +31,6 @@ export const findBusinesses = async (
         }
     } : undefined;
 
-    // Combine system instructions and the user query into a single, robust prompt.
     const prompt = `
 You are a highly efficient AI assistant specialized in finding local business information and formatting it as a CSV.
 
@@ -59,33 +58,60 @@ Your task is to take a user's query, use the provided Google Maps and Google Sea
 **USER QUERY:** "${query}"
 `.trim();
 
+    const MAX_RETRIES = 3;
+    const INITIAL_DELAY_MS = 1000;
 
-    try {
-        const response = await ai.models.generateContent({
-            model: model,
-            // The combined prompt is sent as the main content.
-            contents: prompt,
-            config: {
-                // The model has both tools available
-                tools: [{ googleMaps: {} }, { googleSearch: {} }],
-                toolConfig: toolConfig
-            },
-        });
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            const response = await ai.models.generateContent({
+                model: model,
+                contents: prompt,
+                config: {
+                    tools: [{ googleMaps: {} }, { googleSearch: {} }],
+                    toolConfig: toolConfig
+                },
+            });
 
-        const csvData = response.text;
-        const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            const csvData = response.text;
+            const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-        if (!csvData) {
-            throw new Error("API returned no content. The model might have refused to answer.");
+            if (!csvData) {
+                // This case handles when the model successfully responds but with empty content.
+                // We don't want to retry this, as it's a content issue, not a server issue.
+                throw new Error("API returned no content. The model might have refused to answer.");
+            }
+
+            // Success! Return the data and exit the function.
+            return { csvData, sources };
+
+        } catch (error) {
+            // Check if the error is a 503 "UNAVAILABLE" and if we have retries left.
+            if (attempt < MAX_RETRIES - 1 && error instanceof Error && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded'))) {
+                const delay = INITIAL_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1000; // Exponential backoff with jitter
+                console.warn(`Model is overloaded. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${attempt + 1}/${MAX_RETRIES})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue; // Go to the next loop iteration to retry.
+            }
+
+            // If it's not a retryable error or we've exhausted all retries, handle the error.
+            console.error(`Error calling Gemini API after ${attempt + 1} attempt(s):`, error);
+            
+            if (error instanceof Error) {
+                 if (error.message.includes('SAFETY')) {
+                     throw new Error("The response was blocked due to safety settings. Please modify your query.");
+                }
+                 if (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')) {
+                    throw new Error("The model is currently overloaded and could not respond after multiple attempts. Please try again in a few moments.");
+                }
+                // Re-throw the original error for other specific cases like no content.
+                throw error;
+            }
+
+            // Fallback for unknown errors.
+            throw new Error("Failed to fetch business data. An unknown error occurred.");
         }
-
-        return { csvData, sources };
-
-    } catch (error) {
-        console.error("Error calling Gemini API:", error);
-        if (error instanceof Error && error.message.includes('SAFETY')) {
-             throw new Error("The response was blocked due to safety settings. Please modify your query.");
-        }
-        throw new Error("Failed to fetch business data. Please check your query or API key.");
     }
+    
+    // This line should theoretically not be reached, but it's a safeguard.
+    throw new Error("Failed to get a response from the API after multiple retries.");
 };
