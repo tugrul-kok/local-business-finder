@@ -6,6 +6,7 @@ export interface Business {
   'Web Sitesi': string;
   'E-posta': string;
   'Google Maps Linki': string;
+  'Değerlendirme': string; // Rating, e.g., "4.5/5"
 }
 
 export type SortDirection = 'ascending' | 'descending';

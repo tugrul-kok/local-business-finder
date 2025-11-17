@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { findBusinesses } from './services/geminiService';
 import type { Business, GroundingChunk, SortConfig } from './types';
 import Header from './components/Header';
@@ -17,21 +17,40 @@ const App: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
     const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+    const [locationStatus, setLocationStatus] = useState<'idle' | 'fetching' | 'success' | 'error'>('idle');
 
-    useEffect(() => {
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    setUserLocation({
-                        latitude: position.coords.latitude,
-                        longitude: position.coords.longitude,
-                    });
-                },
-                (err) => {
-                    console.warn(`Geolocation error: ${err.message}. Searches may be less accurate.`);
-                }
-            );
+    const handleGetLocation = useCallback(() => {
+        if (!navigator.geolocation) {
+            setError("Geolocation is not supported by your browser.");
+            setLocationStatus('error');
+            setTimeout(() => setLocationStatus('idle'), 3000);
+            return;
         }
+
+        setLocationStatus('fetching');
+        setError(null);
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                setUserLocation({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                });
+                setLocationStatus('success');
+                // Reset status after a couple of seconds for feedback
+                setTimeout(() => setLocationStatus('idle'), 2000);
+            },
+            (err) => {
+                let message = "Could not get your location. Searches may be less accurate.";
+                if (err.code === err.PERMISSION_DENIED) {
+                    message = "You denied location access. Please enable it in your browser settings to use this feature.";
+                }
+                setError(message);
+                setLocationStatus('error');
+                // Reset status after a while
+                setTimeout(() => setLocationStatus('idle'), 4000);
+            }
+        );
     }, []);
 
     const parseCsv = (csvText: string): Business[] => {
@@ -67,18 +86,53 @@ const App: React.FC = () => {
             };
 
             const headers = parseCsvLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, '')); // Clean headers
-            const requiredHeaders = ['İşletme Adı', 'Kategori', 'Adres', 'Telefon Numarası', 'Web Sitesi', 'E-posta', 'Google Maps Linki'];
+            const requiredHeaders = ['İşletme Adı', 'Kategori', 'Adres', 'Telefon Numarası', 'Web Sitesi', 'E-posta', 'Google Maps Linki', 'Değerlendirme'];
             if (!requiredHeaders.every(h => headers.includes(h))) {
                  console.error("CSV headers do not match expected format.", {expected: requiredHeaders, received: headers});
                  throw new Error("The data received from the API was not in the expected format. Please try a different query.");
             }
+            
+            const headerCount = headers.length;
+            const addressIndex = headers.indexOf('Adres');
+            if (addressIndex === -1) {
+                throw new Error("CSV data is missing the required 'Adres' column.");
+            }
 
             return lines.slice(1).map(line => {
-                const values = parseCsvLine(line);
+                // Use the robust parser first.
+                let values = parseCsvLine(line);
+
+                // Heuristic Correction: If column count is wrong, it's likely due to unquoted commas in the address.
+                if (values.length !== headerCount) {
+                    const simpleSplitValues = line.split(',');
+                    if (simpleSplitValues.length > headerCount) {
+                        const overflow = simpleSplitValues.length - headerCount;
+                        // Re-join the parts that are supposed to be the address.
+                        const addressParts = simpleSplitValues.slice(addressIndex, addressIndex + overflow + 1);
+                        const correctedAddress = addressParts.join(', ').trim();
+                        
+                        // Reconstruct the array of values.
+                        const correctedValues = [
+                            ...simpleSplitValues.slice(0, addressIndex),
+                            correctedAddress,
+                            ...simpleSplitValues.slice(addressIndex + overflow + 1)
+                        ];
+
+                        if (correctedValues.length === headerCount) {
+                           values = correctedValues;
+                        } else {
+                           console.warn("CSV parsing heuristic failed for line:", line);
+                        }
+                    }
+                }
+                
+                // Final safety check to ensure values array matches header count
+                while (values.length < headerCount) values.push('N/A');
+                if (values.length > headerCount) values = values.slice(0, headerCount);
+
                 const entry: { [key: string]: string } = {};
                 headers.forEach((header, index) => {
                     if (header) { 
-                      // Clean the value by removing potential surrounding quotes and trimming whitespace.
                       const cleanedValue = values[index]?.trim().replace(/^"|"$/g, '');
                       entry[header] = cleanedValue || 'N/A';
                     }
@@ -156,6 +210,8 @@ const App: React.FC = () => {
                         setQuery={setQuery}
                         onSearch={handleSearch}
                         isLoading={isLoading}
+                        onGetLocation={handleGetLocation}
+                        locationStatus={locationStatus}
                     />
                     <div className="mt-8 p-6 bg-gray-800/50 rounded-lg shadow-xl min-h-[400px] flex flex-col justify-center">
                         {isLoading && <LoadingSpinner />}

@@ -37,7 +37,7 @@ Your task is to take a user's query, use the provided Google Maps and Google Sea
 
 **OUTPUT RULES:**
 1.  **CSV Only:** Your entire response must be ONLY raw CSV data. No introductory text, no summaries, no explanations.
-2.  **Header Row:** The first line must be the header: "İşletme Adı","Kategori","Adres","Telefon Numarası","Web Sitesi","E-posta","Google Maps Linki"
+2.  **Header Row:** The first line must be the header: "İşletme Adı","Kategori","Adres","Telefon Numarası","Web Sitesi","E-posta","Google Maps Linki","Değerlendirme"
 3.  **Data Columns:**
     - "İşletme Adı": The name of the business.
     - "Kategori": The business category (e.g., "Restoran", "Dişçi").
@@ -46,6 +46,7 @@ Your task is to take a user's query, use the provided Google Maps and Google Sea
     - "Web Sitesi": The official website URL. You MUST make a strong effort to find this using your tools.
     - "E-posta": The contact email address. You MUST make a strong effort to find this using your tools.
     - "Google Maps Linki": The direct Google Maps URL for the business. You MUST find this using the Google Maps tool.
+    - "Değerlendirme": The average user rating, preferably in "X.X/5" format. You MUST find this using your tools.
 4.  **Formatting:** Any field containing a comma must be enclosed in double quotes.
 5.  **Missing Data:** If, after a thorough search with all tools, a piece of information is truly unavailable, use "N/A". Do not use it as a default.
 `.trim();

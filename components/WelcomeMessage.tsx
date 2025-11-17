@@ -8,7 +8,7 @@ const WelcomeMessage: React.FC = () => {
             </svg>
             <h2 className="text-2xl font-semibold text-gray-300">Ready to Find a Business?</h2>
             <p className="mt-2 max-w-md mx-auto">
-                Enter a query above to search for local businesses. You can search for things like "Italian restaurants in Ankara" or "hardware stores near me".
+                Enter a query like "Italian restaurants in Ankara" or use the location button to find businesses near you.
             </p>
         </div>
     );
