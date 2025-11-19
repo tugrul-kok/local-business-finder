@@ -1,3 +1,4 @@
+
 export interface Business {
   'İşletme Adı': string;
   'Kategori': string;
@@ -35,3 +36,8 @@ export interface GroundingChunk {
 }
 
 export type ModelOption = 'fast' | 'deep';
+
+export interface FindBusinessesResult {
+    businesses: Business[];
+    sources: GroundingChunk[];
+}

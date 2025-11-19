@@ -1,10 +1,6 @@
-import { GoogleGenAI } from "@google/genai";
-import type { GroundingChunk } from '../types';
 
-interface FindBusinessesResult {
-    csvData: string;
-    sources: GroundingChunk[];
-}
+import { GoogleGenAI } from "@google/genai";
+import type { GroundingChunk, Business, FindBusinessesResult } from '../types';
 
 interface UserLocation {
     latitude: number;
@@ -31,31 +27,47 @@ export const findBusinesses = async (
         }
     } : undefined;
 
+    // We request JSON output in the prompt text (without forcing responseMimeType/responseSchema)
+    // because using responseSchema is not supported when using the googleMaps tool for grounding.
     const prompt = `
-You are a highly efficient AI assistant specialized in finding local business information and formatting it as a CSV.
+You are a highly efficient AI assistant specialized in finding local business information.
 
-Your task is to take a user's query, use the provided Google Maps and Google Search tools to find relevant businesses, and then output the data STRICTLY in the following CSV format.
+YOUR TASK:
+1. Search for local businesses matching the user's query using Google Maps and Google Search tools.
+2. Extract specific details for EVERY SINGLE business found in the search results.
+3. Return the data as a strict JSON array of objects.
 
-**OUTPUT RULES:**
-1.  **CSV Only:** Your entire response must be ONLY raw CSV data. No introductory text, no summaries, no explanations.
-2.  **Header Row:** The first line must be the header: "İşletme Adı","Kategori","Adres","Telefon Numarası","Web Sitesi","E-posta","Google Maps Linki","Değerlendirme Puanı","Değerlendirme Sayısı","Fiyat Aralığı","Çalışma Saatleri","Durum"
-3.  **Data Columns:**
-    - "İşletme Adı": The name of the business.
-    - "Kategori": The business category (e.g., "Restoran", "Dişçi").
-    - "Adres": The full street address.
-    - "Telefon Numarası": The primary phone number.
-    - "Web Sitesi": The official website URL. You MUST make a strong effort to find this using your tools.
-    - "E-posta": The contact email address. You MUST make a strong effort to find this using your tools.
-    - "Google Maps Linki": The direct Google Maps URL for the business. You MUST find this using the Google Maps tool.
-    - "Değerlendirme Puanı": The average user rating, preferably in "X.X/5" format.
-    - "Değerlendirme Sayısı": The total number of user reviews.
-    - "Fiyat Aralığı": The price range (e.g., "$", "$$", "$$$").
-    - "Çalışma Saatleri": The business's opening hours (e.g., "10:00-22:00").
-    - "Durum": The current status (e.g., "Açık", "Kapalı").
-4.  **Formatting:** Any field containing a comma must be enclosed in double quotes.
-5.  **Missing Data:** If, after a thorough search with all tools, a piece of information is truly unavailable, use "N/A". Do not use it as a default.
+CRITICAL INSTRUCTIONS:
+- You MUST include ALL businesses found in the search results (grounding chunks).
+- Do NOT summarize, filter, or truncate the list. 
+- If the search tool returns 20 businesses, your JSON array MUST contain 20 objects.
+- Do not select only the "top" or "best" ones. List them all to ensure the list matches the source citations.
 
-**USER QUERY:** "${query}"
+OUTPUT FORMAT:
+Return ONLY a valid JSON array. Do not include markdown formatting (like \`\`\`json) or introductory text.
+
+JSON STRUCTURE per business:
+{
+  "name": "Business Name",
+  "category": "Category",
+  "address": "Full Street Address",
+  "phone": "Phone Number",
+  "website": "Website URL",
+  "email": "Email Address",
+  "mapsLink": "Google Maps Direct Link",
+  "rating": "Rating (e.g. 4.5/5)",
+  "reviews": "Number of reviews",
+  "price": "Price Range (e.g. $$)",
+  "hours": "Opening Hours",
+  "status": "Open/Closed Status"
+}
+
+RULES:
+- If a field is missing, use "N/A".
+- "mapsLink" MUST be the direct Google Maps URL found via the Maps tool.
+- Try your best to find "website" and "email" using the Search tool.
+
+USER QUERY: "${query}"
 `.trim();
 
     const MAX_RETRIES = 3;
@@ -72,46 +84,84 @@ Your task is to take a user's query, use the provided Google Maps and Google Sea
                 },
             });
 
-            const csvData = response.text;
+            let text = response.text || "";
             const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-            if (!csvData) {
-                // This case handles when the model successfully responds but with empty content.
-                // We don't want to retry this, as it's a content issue, not a server issue.
-                throw new Error("API returned no content. The model might have refused to answer.");
+            if (!text) {
+                throw new Error("API returned no content.");
             }
 
-            // Success! Return the data and exit the function.
-            return { csvData, sources };
+            // Clean up potential markdown code blocks
+            text = text.replace(/```json\s*/g, "").replace(/```\s*$/g, "").trim();
+            
+            // Extract JSON array if embedded in other text
+            const start = text.indexOf('[');
+            const end = text.lastIndexOf(']');
+            if (start !== -1 && end !== -1) {
+                text = text.substring(start, end + 1);
+            }
+
+            let rawData: any[] = [];
+            try {
+                rawData = JSON.parse(text);
+            } catch (e) {
+                console.error("Failed to parse JSON from model response:", text);
+                // If parsing fails, valid JSON wasn't returned. We might want to retry.
+                if (attempt < MAX_RETRIES - 1) {
+                    console.warn("Retrying due to JSON parse error...");
+                    continue;
+                }
+                throw new Error("The AI response was not in the expected format.");
+            }
+
+            if (!Array.isArray(rawData)) {
+                if (attempt < MAX_RETRIES - 1) continue;
+                throw new Error("The AI response was not a list of businesses.");
+            }
+
+            // Map the English JSON keys to the Turkish keys expected by the frontend app
+            const businesses: Business[] = rawData.map((item: any) => ({
+                'İşletme Adı': item.name || 'N/A',
+                'Kategori': item.category || 'N/A',
+                'Adres': item.address || 'N/A',
+                'Telefon Numarası': item.phone || 'N/A',
+                'Web Sitesi': item.website || 'N/A',
+                'E-posta': item.email || 'N/A',
+                'Google Maps Linki': item.mapsLink || 'N/A',
+                'Değerlendirme Puanı': item.rating || 'N/A',
+                'Değerlendirme Sayısı': item.reviews || 'N/A',
+                'Fiyat Aralığı': item.price || 'N/A',
+                'Çalışma Saatleri': item.hours || 'N/A',
+                'Durum': item.status || 'N/A',
+            }));
+
+            return { businesses, sources };
 
         } catch (error) {
-            // Check if the error is a 503 "UNAVAILABLE" and if we have retries left.
+            // Check if the error is a 503 "UNAVAILABLE" or 429
             if (attempt < MAX_RETRIES - 1 && error instanceof Error && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded'))) {
-                const delay = INITIAL_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1000; // Exponential backoff with jitter
-                console.warn(`Model is overloaded. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${attempt + 1}/${MAX_RETRIES})`);
+                const delay = INITIAL_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1000; // Exponential backoff
+                console.warn(`Model overloaded. Retrying in ${Math.round(delay / 1000)}s...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
-                continue; // Go to the next loop iteration to retry.
+                continue;
             }
 
-            // If it's not a retryable error or we've exhausted all retries, handle the error.
-            console.error(`Error calling Gemini API after ${attempt + 1} attempt(s):`, error);
+            console.error(`Error calling Gemini API (Attempt ${attempt + 1}):`, error);
             
             if (error instanceof Error) {
                  if (error.message.includes('SAFETY')) {
                      throw new Error("The response was blocked due to safety settings. Please modify your query.");
                 }
                  if (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')) {
-                    throw new Error("The model is currently overloaded and could not respond after multiple attempts. Please try again in a few moments.");
+                    throw new Error("The model is currently overloaded. Please try again later.");
                 }
-                // Re-throw the original error for other specific cases like no content.
+                // Re-throw if it's one of our custom errors (like JSON parse error)
                 throw error;
             }
 
-            // Fallback for unknown errors.
             throw new Error("Failed to fetch business data. An unknown error occurred.");
         }
     }
     
-    // This line should theoretically not be reached, but it's a safeguard.
-    throw new Error("Failed to get a response from the API after multiple retries.");
+    throw new Error("Failed to get a valid response from the API after multiple retries.");
 };

@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useMemo } from 'react';
 import { findBusinesses } from './services/geminiService';
 import type { Business, GroundingChunk, SortConfig, ModelOption } from './types';
@@ -60,102 +61,6 @@ const App: React.FC = () => {
         );
     }, []);
 
-    const parseCsv = (csvText: string): Business[] => {
-        try {
-            const lines = csvText.trim().split('\n').filter(line => line.trim() !== '');
-            if (lines.length < 2) return [];
-
-            // A robust, manual CSV line parser that handles quoted fields.
-            const parseCsvLine = (line: string): string[] => {
-                const values: string[] = [];
-                let currentVal = '';
-                let inQuotes = false;
-                for (let i = 0; i < line.length; i++) {
-                    const char = line[i];
-
-                    if (char === '"') {
-                        // Handle escaped quotes ("")
-                        if (inQuotes && line[i + 1] === '"') {
-                            currentVal += '"';
-                            i++; // Skip the next quote
-                        } else {
-                            inQuotes = !inQuotes;
-                        }
-                    } else if (char === ',' && !inQuotes) {
-                        values.push(currentVal);
-                        currentVal = '';
-                    } else {
-                        currentVal += char;
-                    }
-                }
-                values.push(currentVal); // Add the last value
-                return values;
-            };
-
-            const headers = parseCsvLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, '')); // Clean headers
-            const requiredHeaders = ['İşletme Adı', 'Kategori', 'Adres', 'Telefon Numarası', 'Web Sitesi', 'E-posta', 'Google Maps Linki', 'Değerlendirme Puanı', 'Değerlendirme Sayısı', 'Fiyat Aralığı', 'Çalışma Saatleri', 'Durum'];
-            if (!requiredHeaders.every(h => headers.includes(h))) {
-                 console.error("CSV headers do not match expected format.", {expected: requiredHeaders, received: headers});
-                 throw new Error("The data received from the API was not in the expected format. Please try a different query.");
-            }
-            
-            const headerCount = headers.length;
-            const addressIndex = headers.indexOf('Adres');
-            if (addressIndex === -1) {
-                throw new Error("CSV data is missing the required 'Adres' column.");
-            }
-
-            return lines.slice(1).map(line => {
-                // Use the robust parser first.
-                let values = parseCsvLine(line);
-
-                // Heuristic Correction: If column count is wrong, it's likely due to unquoted commas in the address.
-                if (values.length !== headerCount) {
-                    const simpleSplitValues = line.split(',');
-                    if (simpleSplitValues.length > headerCount) {
-                        const overflow = simpleSplitValues.length - headerCount;
-                        // Re-join the parts that are supposed to be the address.
-                        const addressParts = simpleSplitValues.slice(addressIndex, addressIndex + overflow + 1);
-                        const correctedAddress = addressParts.join(', ').trim();
-                        
-                        // Reconstruct the array of values.
-                        const correctedValues = [
-                            ...simpleSplitValues.slice(0, addressIndex),
-                            correctedAddress,
-                            ...simpleSplitValues.slice(addressIndex + overflow + 1)
-                        ];
-
-                        if (correctedValues.length === headerCount) {
-                           values = correctedValues;
-                        } else {
-                           console.warn("CSV parsing heuristic failed for line:", line);
-                        }
-                    }
-                }
-                
-                // Final safety check to ensure values array matches header count
-                while (values.length < headerCount) values.push('N/A');
-                if (values.length > headerCount) values = values.slice(0, headerCount);
-
-                const entry: { [key: string]: string } = {};
-                headers.forEach((header, index) => {
-                    if (header) { 
-                      const cleanedValue = values[index]?.trim().replace(/^"|"$/g, '');
-                      entry[header] = cleanedValue || 'N/A';
-                    }
-                });
-                return entry as unknown as Business;
-            });
-        } catch (e) {
-            console.error("Failed to parse CSV:", e);
-            if (e instanceof Error) {
-                throw new Error(`Failed to parse the data: ${e.message}`);
-            }
-            throw new Error("An unknown error occurred while parsing the data.");
-        }
-    };
-
-
     const handleSearch = useCallback(async () => {
         if (!query.trim()) {
             setError("Please enter a search query.");
@@ -178,8 +83,8 @@ const App: React.FC = () => {
             try {
                 result = await findBusinesses(query, userLocation, primaryModel);
             } catch (e) {
-                if (e instanceof Error && e.message.includes("overloaded and could not respond")) {
-                    console.warn(`Primary model (${primaryModel}) failed due to overload. Attempting fallback with ${fallbackModel}.`);
+                if (e instanceof Error && (e.message.includes("overloaded") || e.message.includes("UNAVAILABLE"))) {
+                    console.warn(`Primary model (${primaryModel}) failed. Attempting fallback with ${fallbackModel}.`);
                     setLoadingMessage(`Primary model is busy. Trying ${fallbackModelOption} search...`);
                     result = await findBusinesses(query, userLocation, fallbackModel);
                 } else {
@@ -189,15 +94,14 @@ const App: React.FC = () => {
             }
 
             // If we get here, one of the calls succeeded
-            const parsedBusinesses = parseCsv(result.csvData);
-            setBusinesses(parsedBusinesses);
+            setBusinesses(result.businesses);
             setSources(result.sources);
 
         } catch (e) {
             // This catches the re-thrown error from the primary call, or any error from the fallback call
             if (e instanceof Error) {
-                if (e.message.includes("overloaded and could not respond")) {
-                    setError("Both Fast and Deep search models are currently overloaded. Please try again in a few moments.");
+                if (e.message.includes("overloaded") || e.message.includes("UNAVAILABLE")) {
+                    setError("Both search models are currently overloaded. Please try again in a few moments.");
                 } else {
                     setError(e.message);
                 }
