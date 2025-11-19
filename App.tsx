@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useMemo } from 'react';
 import { findBusinesses } from './services/geminiService';
 import type { Business, GroundingChunk, SortConfig, ModelOption } from './types';
@@ -9,6 +8,7 @@ import SourceLinks from './components/SourceLinks';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
 import WelcomeMessage from './components/WelcomeMessage';
+import ExportButtons from './components/ExportButtons';
 
 const modelMapping: Record<ModelOption, string> = {
     fast: 'gemini-2.5-flash',
@@ -157,6 +157,7 @@ const App: React.FC = () => {
                         {error && !isLoading && <ErrorMessage message={error} />}
                         {!isLoading && !error && businesses.length > 0 && (
                             <>
+                                <ExportButtons businesses={sortedBusinesses} />
                                 <ResultsTable 
                                     businesses={sortedBusinesses} 
                                     onSort={handleSort}
