@@ -30,46 +30,48 @@ export const findBusinesses = async (
     // We request JSON output in the prompt text (without forcing responseMimeType/responseSchema)
     // because using responseSchema is not supported when using the googleMaps tool for grounding.
     const prompt = `
-You are a highly efficient AI assistant specialized in finding local business information.
+You are a smart local business finder.
 
-YOUR TASK:
-1. Search for local businesses matching the user's query using Google Maps and Google Search tools.
-2. Extract specific details for EVERY SINGLE business found in the search results.
-3. Return the data as a strict JSON array of objects.
+STEP 1: SEARCH
+Use the Google Maps tool to find businesses matching: "${query}".
+Use the Google Search tool to find extra contact details (emails) for these businesses.
 
-CRITICAL INSTRUCTIONS:
-- You MUST include ALL businesses found in the search results (grounding chunks).
-- Do NOT summarize, filter, or truncate the list. 
-- If the search tool returns 20 businesses, your JSON array MUST contain 20 objects.
-- Do not select only the "top" or "best" ones. List them all to ensure the list matches the source citations.
+STEP 2: EXTRACT
+For EACH business found in the Google Maps results, create a JSON object.
+- **name**: Name from Maps.
+- **website**: You **MUST** extract the 'websiteUri' field provided by the Google Maps tool. If the tool has a link, you must include it. Do not mark as N/A if the map result has a link.
+- **email**: Actively scan the Google Search results for the business name + "email" or "contact". Look for patterns like "info@", "contact@", "reservation@".
+- **mapsLink**: The 'googleMapsUri' from Maps.
+- **phone**: The 'internationalPhoneNumber' or 'formattedPhoneNumber' from Maps.
+- **address**: The 'formattedAddress' from Maps.
+- **rating**: 'rating' from Maps.
+- **reviews**: 'userRatingCount' from Maps.
+- **price**: 'priceLevel' from Maps.
+- **hours**: Current open status or hours.
 
-OUTPUT FORMAT:
-Return ONLY a valid JSON array. Do not include markdown formatting (like \`\`\`json) or introductory text.
+STEP 3: FORMAT
+Return a STRICT JSON array containing ALL results.
+Do not summarize. Do not filter. If Maps finds 15 places, return 15 objects.
 
-JSON STRUCTURE per business:
-{
-  "name": "Business Name",
-  "category": "Category",
-  "address": "Full Street Address",
-  "phone": "Phone Number",
-  "website": "Website URL",
-  "email": "Email Address",
-  "mapsLink": "Google Maps Direct Link",
-  "rating": "Rating (e.g. 4.5/5)",
-  "reviews": "Number of reviews",
-  "price": "Price Range (e.g. $$)",
-  "hours": "Opening Hours",
-  "status": "Open/Closed Status"
-}
+JSON Format:
+[
+  {
+    "name": "string",
+    "category": "string",
+    "address": "string",
+    "phone": "string",
+    "website": "string", 
+    "email": "string",
+    "mapsLink": "string",
+    "rating": "string",
+    "reviews": "string",
+    "price": "string",
+    "hours": "string",
+    "status": "string"
+  }
+]
 
-RULES:
-- If a field is missing, use "N/A".
-- "mapsLink" MUST be the direct Google Maps URL found via the Maps tool.
-- "website": PRIORITIZE the website link provided directly by the Google Maps tool result (websiteUri). Only use Search if Maps does not provide it.
-- "email": Use Google Search to find the email address.
-- Do not hallucinate contact info.
-
-USER QUERY: "${query}"
+If a specific value is absolutely not found in either Maps or Search, use "N/A".
 `.trim();
 
     const MAX_RETRIES = 3;
