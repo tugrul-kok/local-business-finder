@@ -65,7 +65,9 @@ JSON STRUCTURE per business:
 RULES:
 - If a field is missing, use "N/A".
 - "mapsLink" MUST be the direct Google Maps URL found via the Maps tool.
-- Try your best to find "website" and "email" using the Search tool.
+- "website": PRIORITIZE the website link provided directly by the Google Maps tool result (websiteUri). Only use Search if Maps does not provide it.
+- "email": Use Google Search to find the email address.
+- Do not hallucinate contact info.
 
 USER QUERY: "${query}"
 `.trim();
