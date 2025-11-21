@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useMemo } from 'react';
 import { findBusinesses } from './services/geminiService';
 import type { Business, GroundingChunk, SortConfig, ModelOption } from './types';
@@ -10,11 +11,6 @@ import ErrorMessage from './components/ErrorMessage';
 import WelcomeMessage from './components/WelcomeMessage';
 import ExportButtons from './components/ExportButtons';
 
-const modelMapping: Record<ModelOption, string> = {
-    fast: 'gemini-2.5-flash',
-    deep: 'gemini-2.5-pro',
-};
-
 const App: React.FC = () => {
     const [query, setQuery] = useState<string>('');
     const [businesses, setBusinesses] = useState<Business[]>([]);
@@ -25,6 +21,7 @@ const App: React.FC = () => {
     const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
     const [locationStatus, setLocationStatus] = useState<'idle' | 'fetching' | 'success' | 'error'>('idle');
     const [modelOption, setModelOption] = useState<ModelOption>('fast');
+    const [resultLimit, setResultLimit] = useState<number | 'all'>('all');
     const [loadingMessage, setLoadingMessage] = useState<string>('');
 
     const handleGetLocation = useCallback(() => {
@@ -72,23 +69,25 @@ const App: React.FC = () => {
         setBusinesses([]);
         setSources([]);
 
-        const primaryModel = modelMapping[modelOption];
+        // If user chose 'fast', fallback is 'deep', and vice versa
         const fallbackModelOption = modelOption === 'fast' ? 'deep' : 'fast';
-        const fallbackModel = modelMapping[fallbackModelOption];
+        const fallbackName = modelOption === 'fast' ? 'Broad (Scraper)' : 'Smart (AI)';
+        const currentName = modelOption === 'fast' ? 'Smart' : 'Broad';
         
-        setLoadingMessage(`Searching with ${modelOption === 'fast' ? 'Fast' : 'Deep'} Search...`);
+        setLoadingMessage(`Searching in ${currentName} mode...`);
 
         try {
             let result;
             try {
-                result = await findBusinesses(query, userLocation, primaryModel);
+                result = await findBusinesses(query, userLocation, modelOption, resultLimit);
             } catch (e) {
-                if (e instanceof Error && (e.message.includes("overloaded") || e.message.includes("UNAVAILABLE"))) {
-                    console.warn(`Primary model (${primaryModel}) failed. Attempting fallback with ${fallbackModel}.`);
-                    setLoadingMessage(`Primary model is busy. Trying ${fallbackModelOption} search...`);
-                    result = await findBusinesses(query, userLocation, fallbackModel);
+                // Attempt fallback if overloaded OR timed out
+                if (e instanceof Error && (e.message.includes("overloaded") || e.message.includes("UNAVAILABLE") || e.message.includes("timed out") || e.message.includes("enabled"))) {
+                    console.warn(`Primary model (${modelOption}) failed. Attempting fallback with ${fallbackModelOption}.`);
+                    setLoadingMessage(`Error (${e.message}). Switching to ${fallbackName} mode...`);
+                    result = await findBusinesses(query, userLocation, fallbackModelOption, resultLimit);
                 } else {
-                    // Re-throw non-overload errors to be caught by the outer catch block
+                    // Re-throw other errors to be caught by the outer catch block
                     throw e;
                 }
             }
@@ -101,7 +100,7 @@ const App: React.FC = () => {
             // This catches the re-thrown error from the primary call, or any error from the fallback call
             if (e instanceof Error) {
                 if (e.message.includes("overloaded") || e.message.includes("UNAVAILABLE")) {
-                    setError("Both search models are currently overloaded. Please try again in a few moments.");
+                    setError("Google services are currently overloaded. Please try again in a few seconds.");
                 } else {
                     setError(e.message);
                 }
@@ -111,7 +110,7 @@ const App: React.FC = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [query, userLocation, modelOption]);
+    }, [query, userLocation, modelOption, resultLimit]);
 
     const sortedBusinesses = useMemo(() => {
         const sortableItems = [...businesses];
@@ -151,6 +150,8 @@ const App: React.FC = () => {
                         locationStatus={locationStatus}
                         modelOption={modelOption}
                         setModelOption={setModelOption}
+                        resultLimit={resultLimit}
+                        setResultLimit={setResultLimit}
                     />
                     <div className="mt-8 p-6 bg-gray-800/50 rounded-lg shadow-xl min-h-[400px] flex flex-col justify-center">
                         {isLoading && <LoadingSpinner message={loadingMessage} />}

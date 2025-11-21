@@ -1,6 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
-import type { GroundingChunk, Business, FindBusinessesResult } from '../types';
+import type { GroundingChunk, Business, FindBusinessesResult, ModelOption } from '../types';
 
 interface UserLocation {
     latitude: number;
@@ -10,7 +10,8 @@ interface UserLocation {
 export const findBusinesses = async (
     query: string,
     location: UserLocation | null,
-    model: string
+    modelOption: ModelOption,
+    limit: number | 'all' = 'all'
 ): Promise<FindBusinessesResult> => {
     if (!process.env.API_KEY) {
         throw new Error("API_KEY environment variable not set");
@@ -27,145 +28,227 @@ export const findBusinesses = async (
         }
     } : undefined;
 
-    // We request JSON output in the prompt text (without forcing responseMimeType/responseSchema)
-    // because using responseSchema is not supported when using the googleMaps tool for grounding.
-    const prompt = `
-You are a smart local business finder.
+    // --- STRATEGY SELECTION ---
 
-STEP 1: SEARCH
-Use the Google Maps tool to find businesses matching: "${query}".
-Use the Google Search tool to find extra contact details (emails) for these businesses.
+    let systemInstruction = "";
+    
+    // Explicit mapping instructions to force the model to find the data
+    const mappingInstructions = `
+DATA EXTRACTION RULES (STRICT):
+1. **Website**: 
+   - Check the Google Maps tool output for a field called "websiteUri", "website_uri", or "website". 
+   - You MUST copy this value exactly to the "website" key in your JSON. 
+   - If "websiteUri" is missing in Maps, you MUST use Google Search to find the official website.
+2. **Email**: 
+   - Maps does NOT provide emails. You MUST use Google Search to find an email (e.g. search for "Business Name contact email"). 
+   - If found, put it in the "email" key.
+3. **Status**: 
+   - extract "businessStatus" or "business_status" (e.g. "OPERATIONAL", "CLOSED") and map it to "status".
+4. **Phone**: 
+   - extract "formattedPhoneNumber", "internationalPhoneNumber", or "formatted_phone_number" and map it to "phone".
+    `.trim();
 
-STEP 2: EXTRACT
-For EACH business found in the Google Maps results, create a JSON object.
-- **name**: Name from Maps.
-- **website**: You **MUST** extract the 'websiteUri' field provided by the Google Maps tool. If the tool has a link, you must include it. Do not mark as N/A if the map result has a link.
-- **email**: Actively scan the Google Search results for the business name + "email" or "contact". Look for patterns like "info@", "contact@", "reservation@".
-- **mapsLink**: The 'googleMapsUri' from Maps.
-- **phone**: The 'internationalPhoneNumber' or 'formattedPhoneNumber' from Maps.
-- **address**: The 'formattedAddress' from Maps.
-- **rating**: 'rating' from Maps.
-- **reviews**: 'userRatingCount' from Maps.
-- **price**: 'priceLevel' from Maps.
-- **hours**: Current open status or hours.
-
-STEP 3: FORMAT
-Return a STRICT JSON array containing ALL results.
-Do not summarize. Do not filter. If Maps finds 15 places, return 15 objects.
-
-JSON Format:
+    const jsonFormatInstruction = `
+Output STRICT JSON format only. Do not add markdown code blocks.
+The output must be a JSON array of objects with these exact keys:
 [
   {
-    "name": "string",
-    "category": "string",
-    "address": "string",
-    "phone": "string",
-    "website": "string", 
-    "email": "string",
-    "mapsLink": "string",
-    "rating": "string",
-    "reviews": "string",
-    "price": "string",
-    "hours": "string",
-    "status": "string"
+    "name": "Business Name",
+    "category": "Category",
+    "address": "Full Address",
+    "phone": "Phone Number",
+    "website": "URL or N/A",
+    "email": "Email or N/A",
+    "mapsLink": "Google Maps URL",
+    "rating": "4.5/5",
+    "reviews": "120",
+    "price": "$$",
+    "hours": "Open 9AM-5PM",
+    "status": "Open"
   }
 ]
+`;
 
-If a specific value is absolutely not found in either Maps or Search, use "N/A".
+    if (modelOption === 'fast') {
+        // STRATEGY: SMART / SEMANTIC
+        const limitText = limit === 'all' ? "20" : limit; 
+        
+        systemInstruction = `
+You are an intelligent local guide.
+Task: Find the best businesses matching: "${query}".
+Goal: High quality results with COMPLETE contact info (Website and Email are priority).
+Tools: Google Maps (primary), Google Search (secondary).
+
+Instructions:
+1. **SEARCH**: Execute Google Maps search for "${query}".
+2. **SELECT**: Choose the top ${limitText} best matches.
+3. **ENRICH (MANDATORY)**: 
+   - For EVERY selected business, look for its "websiteUri" in the Maps data.
+   - **CRITICAL**: If the website is missing, OR to find the Email, you MUST perform a Google Search for that specific business.
+4. ${mappingInstructions}
+5. ${jsonFormatInstruction}
 `.trim();
 
-    const MAX_RETRIES = 3;
-    const INITIAL_DELAY_MS = 1000;
+    } else {
+        // STRATEGY: BROAD / SCRAPER
+        const isHighVolume = limit === 'all' || (typeof limit === 'number' && limit > 20);
+        const volumeInstruction = isHighVolume
+            ? `
+   - **CRITICAL**: Google Maps tool only gives 20 results. 
+   - AFTER the Maps search, you MUST use the **Google Search** tool to find "List of ${query}" or directories.
+   - Extract businesses from the web search results and APPEND them to the Maps results.
+   - Try to reach at least 50 results if possible.` 
+            : `Retrieve exactly ${limit} results.`;
+        
+        systemInstruction = `
+You are a raw data extraction engine.
+Task: Create a comprehensive database of businesses for: "${query}".
+Goal: QUANTITY and COMPLETENESS.
+Tools: Google Maps, Google Search.
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+Instructions:
+1. Execute Google Maps search for "${query}".
+2. ${volumeInstruction}
+3. **Do not filter** by rating. Include every single valid business found.
+4. ${mappingInstructions}
+5. ${jsonFormatInstruction}
+`.trim();
+    }
+
+    const maxRetries = 2;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            const response = await ai.models.generateContent({
-                model: model,
-                contents: prompt,
+            console.log(`Attempt ${attempt} (${modelOption}): Sending request to Gemini...`);
+            
+            // Create the promise for the API call
+            const apiCall = ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: [
+                    { role: 'user', parts: [{ text: systemInstruction }] }
+                ],
                 config: {
-                    tools: [{ googleMaps: {} }, { googleSearch: {} }],
-                    toolConfig: toolConfig
-                },
+                    tools: [
+                        { googleMaps: {} },
+                        { googleSearch: {} }
+                    ],
+                    toolConfig: toolConfig,
+                    // We cannot use responseSchema with Google Maps tool, so we rely on the prompt.
+                }
             });
 
-            let text = response.text || "";
-            const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            // 240s (4 minutes) timeout for deep/broad searches to allow for enrichment and scraping
+            const timeoutPromise = new Promise<never>((_, reject) => 
+                setTimeout(() => reject(new Error("Request timed out")), 240000)
+            );
 
-            if (!text) {
-                throw new Error("API returned no content.");
-            }
-
-            // Clean up potential markdown code blocks
-            text = text.replace(/```json\s*/g, "").replace(/```\s*$/g, "").trim();
+            const result = await Promise.race([apiCall, timeoutPromise]);
             
-            // Extract JSON array if embedded in other text
-            const start = text.indexOf('[');
-            const end = text.lastIndexOf(']');
-            if (start !== -1 && end !== -1) {
-                text = text.substring(start, end + 1);
+            // In the new @google/genai SDK, 'text' is a getter on the response object directly,
+            // not a method on a nested 'response' property.
+            const text = result.text || "";
+            console.log("Raw Response Text (First 500 chars):", text.substring(0, 500));
+
+            // 1. Clean Markdown
+            let jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
+            
+            // 2. Extract JSON Array if buried in text
+            const start = jsonStr.indexOf('[');
+            const end = jsonStr.lastIndexOf(']');
+            if (start !== -1 && end !== -1 && end > start) {
+                jsonStr = jsonStr.substring(start, end + 1);
             }
 
-            let rawData: any[] = [];
+            let rawData: any;
             try {
-                rawData = JSON.parse(text);
+                rawData = JSON.parse(jsonStr);
             } catch (e) {
-                console.error("Failed to parse JSON from model response:", text);
-                // If parsing fails, valid JSON wasn't returned. We might want to retry.
-                if (attempt < MAX_RETRIES - 1) {
-                    console.warn("Retrying due to JSON parse error...");
-                    continue;
-                }
-                throw new Error("The AI response was not in the expected format.");
+                console.error("JSON Parse Error:", e);
+                throw new Error("Failed to parse JSON response from AI.");
             }
 
             if (!Array.isArray(rawData)) {
-                if (attempt < MAX_RETRIES - 1) continue;
-                throw new Error("The AI response was not a list of businesses.");
+                // Handle case where AI returns a wrapper object like { "businesses": [...] }
+                const keys = Object.keys(rawData);
+                const arrayKey = keys.find(k => Array.isArray(rawData[k]));
+                if (arrayKey) {
+                    rawData = rawData[arrayKey];
+                } else {
+                    // Fallback: wrap single object in array
+                    rawData = [rawData];
+                }
             }
 
-            // Map the English JSON keys to the Turkish keys expected by the frontend app
-            const businesses: Business[] = rawData.map((item: any) => ({
-                'İşletme Adı': item.name || 'N/A',
-                'Kategori': item.category || 'N/A',
-                'Adres': item.address || 'N/A',
-                'Telefon Numarası': item.phone || 'N/A',
-                'Web Sitesi': item.website || 'N/A',
-                'E-posta': item.email || 'N/A',
-                'Google Maps Linki': item.mapsLink || 'N/A',
-                'Değerlendirme Puanı': item.rating || 'N/A',
-                'Değerlendirme Sayısı': item.reviews || 'N/A',
-                'Fiyat Aralığı': item.price || 'N/A',
-                'Çalışma Saatleri': item.hours || 'N/A',
-                'Durum': item.status || 'N/A',
+            // 3. Robust Parsing with Case-Insensitive Key Lookup
+            const businesses: Business[] = rawData.map((item: any) => {
+                
+                // Helper: Find a value in 'item' by checking a list of potential keys (case-insensitive)
+                const getVal = (potentialKeys: string[]): string => {
+                    const itemKeys = Object.keys(item);
+                    
+                    // 1. Try exact matches first
+                    for (const key of potentialKeys) {
+                        if (item[key] !== undefined && item[key] !== null && item[key] !== 'null' && item[key] !== 'N/A') {
+                            return String(item[key]);
+                        }
+                    }
+
+                    // 2. Try case-insensitive matches
+                    const lowerPotentialKeys = potentialKeys.map(k => k.toLowerCase());
+                    for (const itemKey of itemKeys) {
+                        if (lowerPotentialKeys.includes(itemKey.toLowerCase())) {
+                            const val = item[itemKey];
+                            if (val !== undefined && val !== null && val !== 'null' && val !== 'N/A') {
+                                return String(val);
+                            }
+                        }
+                    }
+                    
+                    return 'N/A';
+                };
+
+                return {
+                    'Business Name': getVal(['name', 'businessName', 'business_name', 'title']),
+                    'Category': getVal(['category', 'type']),
+                    'Address': getVal(['address', 'formattedAddress', 'formatted_address', 'fullAddress']),
+                    'Phone': getVal(['phone', 'phoneNumber', 'formattedPhoneNumber', 'formatted_phone_number', 'internationalPhoneNumber', 'tel']),
+                    'Website': getVal(['website', 'websiteUri', 'website_uri', 'url', 'link', 'homepage']),
+                    'Email': getVal(['email', 'mail', 'contactEmail', 'contact_email']),
+                    'Google Maps Link': getVal(['mapsLink', 'googleMapsUri', 'google_maps_uri', 'mapUrl', 'uri']),
+                    'Rating': getVal(['rating', 'stars', 'score']),
+                    'Review Count': getVal(['reviews', 'reviewCount', 'review_count', 'numberOfReviews']),
+                    'Price Range': getVal(['price', 'priceRange', 'price_range', 'priceLevel']),
+                    'Hours': getVal(['hours', 'openingHours', 'opening_hours', 'regularOpeningHours']),
+                    'Status': getVal(['status', 'businessStatus', 'business_status', 'operationalStatus'])
+                };
+            });
+
+            // Extract grounding sources
+            // In the new @google/genai SDK, candidates are directly on the response object.
+            const chunks = result.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            const sources: GroundingChunk[] = chunks.map((c: any) => ({
+                maps: c.web ? undefined : { // prioritizing proper separation if possible, but Gemini mixes them often
+                    uri: c.web?.uri || c.entity?.id, // Fallback often needed
+                    title: c.web?.title || c.entity?.name
+                },
+                web: c.web
             }));
-
-            return { businesses, sources };
-
-        } catch (error) {
-            // Check if the error is a 503 "UNAVAILABLE" or 429
-            if (attempt < MAX_RETRIES - 1 && error instanceof Error && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded'))) {
-                const delay = INITIAL_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1000; // Exponential backoff
-                console.warn(`Model overloaded. Retrying in ${Math.round(delay / 1000)}s...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                continue;
-            }
-
-            console.error(`Error calling Gemini API (Attempt ${attempt + 1}):`, error);
             
-            if (error instanceof Error) {
-                 if (error.message.includes('SAFETY')) {
-                     throw new Error("The response was blocked due to safety settings. Please modify your query.");
-                }
-                 if (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')) {
-                    throw new Error("The model is currently overloaded. Please try again later.");
-                }
-                // Re-throw if it's one of our custom errors (like JSON parse error)
-                throw error;
-            }
+            // Grounding chunks specifically for Maps usually come in a specific format or just as Web chunks in recent versions
+            // We'll just pass them through and let the UI filter valid URIs.
 
-            throw new Error("Failed to fetch business data. An unknown error occurred.");
+            return { businesses, sources: chunks };
+
+        } catch (e: any) {
+            console.error(`Attempt ${attempt} failed:`, e);
+            lastError = e;
+            if (e.message.includes("timed out")) {
+                // If it's a timeout, we might want to stop immediately or try once more depending on logic.
+                // For now, we let the loop continue if retries left.
+            }
         }
     }
-    
-    throw new Error("Failed to get a valid response from the API after multiple retries.");
+
+    throw lastError || new Error("Failed to fetch businesses after multiple attempts.");
 };

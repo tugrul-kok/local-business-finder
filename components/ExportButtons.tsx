@@ -1,3 +1,4 @@
+
 import React from 'react';
 import type { Business } from '../types';
 
@@ -28,13 +29,13 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({ businesses }) => {
         }
 
         const csvContent = csvRows.join('\n');
-        // Add BOM (\ufeff) so Excel recognizes UTF-8 encoding for Turkish characters
+        // Add BOM (\ufeff) so Excel recognizes UTF-8 encoding
         const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         
         const link = document.createElement('a');
         link.href = url;
-        link.setAttribute('download', 'isletmeler.csv');
+        link.setAttribute('download', 'businesses.csv');
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -52,10 +53,10 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({ businesses }) => {
 
         const ws = XLSX.utils.json_to_sheet(businesses);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "İşletmeler");
+        XLSX.utils.book_append_sheet(wb, ws, "Businesses");
         
         // Generate file and trigger download
-        XLSX.writeFile(wb, "isletmeler.xlsx");
+        XLSX.writeFile(wb, "businesses.xlsx");
     };
 
     return (
@@ -68,7 +69,7 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({ businesses }) => {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 011.414.414l5 5a1 1 0 01.414 1.414V19a2 2 0 01-2 2z" />
                 </svg>
-                CSV İndir
+                Download CSV
             </button>
             <button
                 onClick={downloadExcel}
@@ -78,7 +79,7 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({ businesses }) => {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-emerald-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
-                Excel İndir
+                Download Excel
             </button>
         </div>
     );

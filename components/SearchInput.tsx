@@ -1,3 +1,4 @@
+
 import React from 'react';
 import type { ModelOption } from '../types';
 
@@ -10,9 +11,22 @@ interface SearchInputProps {
     locationStatus: 'idle' | 'fetching' | 'success' | 'error';
     modelOption: ModelOption;
     setModelOption: (model: ModelOption) => void;
+    resultLimit: number | 'all';
+    setResultLimit: (limit: number | 'all') => void;
 }
 
-const SearchInput: React.FC<SearchInputProps> = ({ query, setQuery, onSearch, isLoading, onGetLocation, locationStatus, modelOption, setModelOption }) => {
+const SearchInput: React.FC<SearchInputProps> = ({ 
+    query, 
+    setQuery, 
+    onSearch, 
+    isLoading, 
+    onGetLocation, 
+    locationStatus, 
+    modelOption, 
+    setModelOption,
+    resultLimit,
+    setResultLimit
+}) => {
     
     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Enter') {
@@ -51,6 +65,15 @@ const SearchInput: React.FC<SearchInputProps> = ({ query, setQuery, onSearch, is
         error: 'Could not get location'
     };
 
+    const handleLimitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value;
+        if (val === 'all') {
+            setResultLimit('all');
+        } else {
+            setResultLimit(Number(val));
+        }
+    };
+
     return (
         <div>
             <div className="flex flex-col sm:flex-row gap-2">
@@ -60,7 +83,7 @@ const SearchInput: React.FC<SearchInputProps> = ({ query, setQuery, onSearch, is
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="e.g., 'Cafes in Kadıköy' or 'dentists'"
+                        placeholder="e.g., 'Cafes in London' or 'Dentist'"
                         className="w-full p-3 pr-12 bg-gray-700 border-2 border-gray-600 rounded-md focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition duration-200 text-white placeholder-gray-400"
                         disabled={isLoading}
                     />
@@ -84,52 +107,76 @@ const SearchInput: React.FC<SearchInputProps> = ({ query, setQuery, onSearch, is
                 <button
                     onClick={onSearch}
                     disabled={isLoading}
-                    className="p-3 bg-emerald-600 text-white font-semibold rounded-md hover:bg-emerald-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition duration-200 flex items-center justify-center gap-2"
+                    className="p-3 bg-emerald-600 text-white font-semibold rounded-md hover:bg-emerald-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition duration-200 flex items-center justify-center gap-2 min-w-[120px]"
                 >
                     {isLoading ? (
                         <>
-                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
-                            Searching...
+                            Wait
                         </>
                     ) : (
                         'Search'
                     )}
                 </button>
             </div>
-            <div className="flex justify-center items-center gap-4 mt-4" role="radiogroup" aria-labelledby="model-select-label">
-                <span id="model-select-label" className="text-sm font-medium text-gray-400">
-                    Arama Tipi:
-                </span>
-                <div className="flex items-center gap-1 p-1 bg-gray-800 rounded-lg border border-gray-700">
-                    <button
-                        role="radio"
-                        aria-checked={modelOption === 'fast'}
-                        onClick={() => setModelOption('fast')}
+            <div className="flex flex-wrap items-center gap-4 mt-4">
+                <div className="flex items-center gap-4" role="radiogroup" aria-labelledby="model-select-label">
+                    <span id="model-select-label" className="text-sm font-medium text-gray-400">
+                        Mode:
+                    </span>
+                    <div className="flex items-center gap-1 p-1 bg-gray-800 rounded-lg border border-gray-700">
+                        <button
+                            role="radio"
+                            aria-checked={modelOption === 'fast'}
+                            onClick={() => setModelOption('fast')}
+                            disabled={isLoading}
+                            title="Semantic AI Search - Finds best matches"
+                            className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-emerald-500 disabled:opacity-50 ${
+                                modelOption === 'fast'
+                                    ? 'bg-emerald-600 text-white shadow-md'
+                                    : 'text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                        >
+                            Smart (AI)
+                        </button>
+                        <button
+                            role="radio"
+                            aria-checked={modelOption === 'deep'}
+                            onClick={() => setModelOption('deep')}
+                            disabled={isLoading}
+                            title="Raw Data Scraper - Finds everything found by maps"
+                            className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-cyan-500 disabled:opacity-50 ${
+                                modelOption === 'deep'
+                                    ? 'bg-cyan-600 text-white shadow-md'
+                                    : 'text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                        >
+                            Broad (Scraper)
+                        </button>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <label htmlFor="limit-select" className="text-sm font-medium text-gray-400">
+                        Limit:
+                    </label>
+                    <select
+                        id="limit-select"
+                        value={resultLimit}
+                        onChange={handleLimitChange}
                         disabled={isLoading}
-                        className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-emerald-500 disabled:opacity-50 ${
-                            modelOption === 'fast'
-                                ? 'bg-emerald-600 text-white shadow-md'
-                                : 'text-gray-300 hover:bg-gray-700/50'
-                        }`}
+                        className="bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-1.5"
                     >
-                        Hızlı Arama
-                    </button>
-                    <button
-                        role="radio"
-                        aria-checked={modelOption === 'deep'}
-                        onClick={() => setModelOption('deep')}
-                        disabled={isLoading}
-                        className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-cyan-500 disabled:opacity-50 ${
-                            modelOption === 'deep'
-                                ? 'bg-cyan-600 text-white shadow-md'
-                                : 'text-gray-300 hover:bg-gray-700/50'
-                        }`}
-                    >
-                        Derin Arama
-                    </button>
+                        <option value="5">5</option>
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">No Limit (Max)</option>
+                    </select>
                 </div>
             </div>
         </div>

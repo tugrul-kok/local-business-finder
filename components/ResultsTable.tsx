@@ -1,3 +1,4 @@
+
 import React from 'react';
 import type { Business, SortConfig } from '../types';
 
@@ -53,24 +54,62 @@ const ResultsTable: React.FC<ResultsTableProps> = ({ businesses, onSort, sortCon
                         <tr key={index} className="hover:bg-gray-800/50 transition-colors duration-200">
                             {headers.map((header) => {
                                 const cellValue = business[header as keyof Business];
+                                
+                                const isLink = (val: string) => {
+                                    if (!val || val === 'N/A') return false;
+                                    const v = val.toLowerCase();
+                                    // Simple check: looks like domain or http
+                                    return v.startsWith('http') || v.startsWith('www.') || v.includes('.com') || v.includes('.net') || v.includes('.org') || v.includes('.tr');
+                                };
+                                
+                                const getHref = (val: string) => {
+                                    if (val.startsWith('http')) return val;
+                                    return `https://${val}`;
+                                };
+
+                                let content;
+                                if (header === 'Google Maps Link' && isLink(cellValue)) {
+                                    content = (
+                                        <a 
+                                            href={getHref(cellValue)} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer" 
+                                            className="inline-flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 hover:underline"
+                                        >
+                                            <span>View on Map</span>
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                                                <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                                            </svg>
+                                        </a>
+                                    );
+                                } else if (header === 'Website' && isLink(cellValue)) {
+                                    content = (
+                                        <a 
+                                            href={getHref(cellValue)} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer" 
+                                            className="text-cyan-400 hover:text-cyan-300 hover:underline break-all"
+                                        >
+                                            {cellValue.replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]}
+                                        </a>
+                                    );
+                                } else if (header === 'Email' && cellValue !== 'N/A' && cellValue.includes('@')) {
+                                    content = (
+                                        <a 
+                                            href={`mailto:${cellValue}`}
+                                            className="text-cyan-400 hover:text-cyan-300 hover:underline"
+                                        >
+                                            {cellValue}
+                                        </a>
+                                    );
+                                } else {
+                                    content = cellValue;
+                                }
+
                                 return (
                                     <td key={header} className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">
-                                        {header === 'Google Maps Linki' && cellValue && cellValue !== 'N/A' ? (
-                                            <a 
-                                                href={cellValue} 
-                                                target="_blank" 
-                                                rel="noopener noreferrer" 
-                                                className="inline-flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 hover:underline"
-                                            >
-                                                <span>View on Map</span>
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
-                                                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
-                                                </svg>
-                                            </a>
-                                        ) : (
-                                            cellValue
-                                        )}
+                                        {content}
                                     </td>
                                 );
                             })}
